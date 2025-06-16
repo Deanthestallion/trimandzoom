@@ -1,5 +1,7 @@
-Flask>=2.2
-gunicorn>=22.0
-auto-editor>=24.30.1
-opencv-python-headless
+flask
+uuid
+whisper
+opencv-python
 numpy
+moviepy
+ffmpeg-python
