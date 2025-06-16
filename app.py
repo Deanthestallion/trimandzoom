@@ -33,15 +33,17 @@ def process_video():
 
     file.save(input_path)
 
+    # Step 1: Remove silent scenes using auto-editor
     try:
         subprocess.run([
             'auto-editor', input_path,
             '--silent-speed', '99999', '--video-speed', '1',
-            '--export', 'ffmpeg', '--output', output_path_silence
+            '--export', 'default', '--output', output_path_silence
         ], check=True)
     except subprocess.CalledProcessError as e:
         return jsonify({'error': f'Silence cut failed: {str(e)}'}), 500
 
+    # Step 2: Zoom in on faces using zoom_faces.py
     try:
         subprocess.run([
             'python3', 'zoom_faces.py', output_path_silence, output_path_final
