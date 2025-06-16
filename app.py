@@ -1,64 +1,81 @@
 import os
-import uuid
-from flask import Flask, request, jsonify, send_from_directory
+import time
+from uuid import uuid4
+from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import subprocess
 
 app = Flask(__name__)
+
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
-DOMAIN = "https://auto-editor-33k6.onrender.com"
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
+
 @app.route('/')
-def home():
-    return 'Video Silence + Face Zoom Processor is Running'
+def index():
+    return 'Video Silence Remover API is running.'
+
 
 @app.route('/process', methods=['POST'])
 def process_video():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file provided'}), 400
 
-    file = request.files['file']
+    file = request.files['video']
     if file.filename == '':
         return jsonify({'error': 'Empty filename'}), 400
 
+    # Save uploaded file
     filename = secure_filename(file.filename)
-    file_id = uuid.uuid4().hex
-    input_path = os.path.join(UPLOAD_FOLDER, f"input_{file_id}.mp4")
-    output_path_silence = os.path.join(OUTPUT_FOLDER, f"silence_removed_{file_id}.mp4")
-    output_path_final = os.path.join(OUTPUT_FOLDER, f"final_output_{file_id}.mp4")
-
+    input_path = os.path.join(UPLOAD_FOLDER, f"{uuid4().hex}_{filename}")
     file.save(input_path)
 
-    # Step 1: Remove silent scenes using auto-editor
-    try:
-        subprocess.run([
-            'auto-editor', input_path,
-            '--silent-speed', '99999', '--video-speed', '1',
-            '--export', 'default', '--output', output_path_silence
-        ], check=True)
-    except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Silence cut failed: {str(e)}'}), 500
+    # Generate output filename
+    output_filename = f"silence_removed_{uuid4().hex}.mp4"
+    output_path = os.path.join(OUTPUT_FOLDER, output_filename)
 
-    # Step 2: Zoom in on faces using zoom_faces.py
+    # Run auto-editor (requires auto-editor to be installed and in PATH)
     try:
-        subprocess.run([
-            'python3', 'zoom_faces.py', output_path_silence, output_path_final
-        ], check=True)
-    except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Zooming failed: {str(e)}'}), 500
+        cmd = [
+            'auto-editor',
+            input_path,
+            '--silent-threshold', '0.03',
+            '--margin', '0.2',
+            '--frame-margin', '6',
+            '--video-speed', '1',
+            '--silent-speed', '99999',
+            '--export', 'ffmpeg',
+            '--output', output_path
+        ]
+        subprocess.run(cmd, check=True)
 
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': 'Processing failed', 'details': str(e)}), 500
+
+    # Wait until file is fully written
+    timeout = 120  # seconds
+    start_time = time.time()
+    while not os.path.exists(output_path):
+        if time.time() - start_time > timeout:
+            return jsonify({'error': 'Timed out waiting for output file'}), 500
+        time.sleep(1)
+
+    # Return the download link
     return jsonify({
         'message': 'Video processed successfully',
-        'download_url': f"{DOMAIN}/download/{os.path.basename(output_path_final)}"
-    }), 200
+        'download_url': f"{request.host_url}download/{output_filename}"
+    })
+
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
-    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+    file_path = os.path.join(OUTPUT_FOLDER, filename)
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    return jsonify({'error': 'File not ready or not found'}), 404
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
